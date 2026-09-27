@@ -3,4 +3,24 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
-.impeccable/review/
+# Generated builds and packaging metadata
+build/
+dist/
+*.egg-info/
+
+# Local design work and verification output
+.impeccable/
+
+# Local configuration and diagnostic exports
+.env
+.env.*
+!.env.example
+*.log
+pi4b-hardware-report-*.json
+pi4b-hardware-report-*.txt
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
