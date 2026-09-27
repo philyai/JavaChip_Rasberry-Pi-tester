@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QPalette
+from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
-    QProgressBar,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -32,23 +31,18 @@ from PySide6.QtWidgets import (
 from .diagnostics import MANUAL_TESTS, DiagnosticSuite
 from .models import Health, ResultStatus, TestResult, overall_health
 from .reporting import make_report, report_text, save_report
+from .theme import (
+    HEALTH_STATUS,
+    STATUS_COLORS,
+    BenchProgressBar,
+    StatusLabel,
+    apply_theme,
+    mono_font,
+    status_icon,
+    style_results_table,
+)
 
 LOG = logging.getLogger(__name__)
-
-STATUS_COLORS = {
-    ResultStatus.PASS: "#157347",
-    ResultStatus.WARNING: "#a06100",
-    ResultStatus.FAIL: "#b42318",
-    ResultStatus.MANUAL: "#4d538c",
-    ResultStatus.NOT_AVAILABLE: "#5c6370",
-    ResultStatus.NOT_TESTED: "#5c6370",
-}
-HEALTH_COLORS = {
-    Health.UNKNOWN: "#5c6370",
-    Health.GOOD: "#157347",
-    Health.WARNING: "#a06100",
-    Health.PROBLEM: "#b42318",
-}
 
 
 class DiagnosticWorker(QObject):
@@ -90,7 +84,7 @@ class DetailDialog(QDialog):
         editor = QPlainTextEdit(text)
         editor.setReadOnly(True)
         editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        editor.setFont(QFont("Monospace", 10))
+        editor.setFont(mono_font())
         layout.addWidget(editor)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
@@ -113,6 +107,8 @@ class ManualTestsDialog(QDialog):
         layout.addWidget(heading)
         layout.addWidget(intro)
         table = QTableWidget(len(MANUAL_TESTS), 2)
+        table.setAlternatingRowColors(True)
+        table.setColumnWidth(0, 162)
         table.setHorizontalHeaderLabels(["Test", "How to check safely"])
         table.horizontalHeader().setStretchLastSection(True)
         table.verticalHeader().setVisible(False)
@@ -125,6 +121,7 @@ class ManualTestsDialog(QDialog):
             table.setItem(row, 1, item)
         table.resizeRowsToContents()
         layout.addWidget(table)
+        QTimer.singleShot(0, table.resizeRowsToContents)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -183,7 +180,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
         root.setContentsMargins(28, 24, 28, 24)
-        root.setSpacing(18)
+        root.setSpacing(16)
 
         header = QHBoxLayout()
         title_block = QVBoxLayout()
@@ -202,7 +199,7 @@ class MainWindow(QMainWindow):
         health_box = QVBoxLayout()
         health_label = QLabel("OVERALL HEALTH")
         health_label.setObjectName("healthLabel")
-        self.health_value = QLabel(Health.UNKNOWN.value)
+        self.health_value = StatusLabel(Health.UNKNOWN.value)
         self.health_value.setObjectName("healthValue")
         self._set_health(Health.UNKNOWN)
         health_box.addWidget(health_label, alignment=Qt.AlignmentFlag.AlignRight)
@@ -214,6 +211,7 @@ class MainWindow(QMainWindow):
         info_frame.setObjectName("infoFrame")
         grid = QGridLayout(info_frame)
         grid.setContentsMargins(18, 14, 18, 14)
+        grid.setHorizontalSpacing(20)
         self.info_values: dict[str, QLabel] = {}
         for index, field in enumerate(
             ("Device", "Architecture", "Operating System", "Kernel")
@@ -266,6 +264,7 @@ class MainWindow(QMainWindow):
         section = QLabel("Diagnostic results")
         section.setObjectName("sectionTitle")
         self.results_table = QTableWidget(0, 3)
+        style_results_table(self.results_table)
         self.results_table.setHorizontalHeaderLabels(["Check", "Status", "Summary"])
         self.results_table.horizontalHeader().setStretchLastSection(True)
         self.results_table.setSelectionBehavior(
@@ -287,7 +286,7 @@ class MainWindow(QMainWindow):
         detail_layout.setContentsMargins(18, 16, 18, 16)
         detail_title = QLabel("Selected result")
         detail_title.setObjectName("sectionTitle")
-        self.detail_status = QLabel("NOT TESTED")
+        self.detail_status = StatusLabel("NOT TESTED")
         self.detail_status.setObjectName("detailStatus")
         self.detail_summary = QLabel(
             "Run a diagnostic to see evidence and practical next steps here."
@@ -307,7 +306,9 @@ class MainWindow(QMainWindow):
 
         progress_layout = QHBoxLayout()
         self.progress_label = QLabel("Ready. No hardware checks have run yet.")
-        self.progress_bar = QProgressBar()
+        self.progress_label.setObjectName("progressLabel")
+        self.progress_label.setWordWrap(True)
+        self.progress_bar = BenchProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
@@ -353,7 +354,7 @@ class MainWindow(QMainWindow):
 
     def _set_health(self, health: Health) -> None:
         self.health_value.setText(health.value)
-        self.health_value.setStyleSheet(f"color: {HEALTH_COLORS[health]};")
+        self.health_value.set_status(HEALTH_STATUS[health])
 
     def _set_busy(self, busy: bool) -> None:
         for button in (
@@ -521,7 +522,8 @@ class MainWindow(QMainWindow):
         self.results_table.setItem(row, 0, QTableWidgetItem(result.name))
         status = QTableWidgetItem(result.status.value)
         status.setForeground(QColor(STATUS_COLORS[result.status]))
-        status.setFont(QFont("Sans Serif", 9, QFont.Weight.DemiBold))
+        status.setFont(mono_font(bold=True))
+        status.setIcon(status_icon(result.status))
         self.results_table.setItem(row, 1, status)
         self.results_table.setItem(row, 2, QTableWidgetItem(result.summary))
         self.results_table.resizeRowToContents(row)
@@ -540,7 +542,7 @@ class MainWindow(QMainWindow):
             return
         result = self.results[row]
         self.detail_status.setText(result.status.value)
-        self.detail_status.setStyleSheet(f"color: {STATUS_COLORS[result.status]};")
+        self.detail_status.set_status(result.status)
         self.detail_summary.setText(result.summary)
         chunks = []
         if result.details:
@@ -666,45 +668,6 @@ def configure_logging() -> None:
         logging.basicConfig(
             level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
         )
-
-
-def apply_theme(app: QApplication) -> None:
-    app.setStyle("Fusion")
-    palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window, QColor("#f5f7f8"))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor("#17212b"))
-    palette.setColor(QPalette.ColorRole.Base, QColor("#ffffff"))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#f5f7f8"))
-    palette.setColor(QPalette.ColorRole.Text, QColor("#17212b"))
-    palette.setColor(QPalette.ColorRole.Button, QColor("#ffffff"))
-    palette.setColor(QPalette.ColorRole.ButtonText, QColor("#17212b"))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor("#0f766e"))
-    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
-    app.setPalette(palette)
-    app.setStyleSheet("""
-        QWidget { font-family: 'Segoe UI', 'Noto Sans', 'DejaVu Sans', sans-serif; font-size: 13px; }
-        QWidget#central { background: #f5f7f8; }
-        QLabel#title { color: #17212b; font-size: 27px; font-weight: 700; }
-        QLabel#subtitle { color: #52616b; font-size: 14px; }
-        QLabel#healthLabel, QLabel#infoLabel { color: #52616b; font-size: 11px; font-weight: 700; letter-spacing: .7px; }
-        QLabel#healthValue { font-size: 17px; font-weight: 700; }
-        QFrame#infoFrame, QFrame#detailFrame { background: #ffffff; border: 1px solid #dbe2e5; border-radius: 14px; }
-        QLabel#infoValue { color: #17212b; font-weight: 600; }
-        QLabel#sectionTitle, QLabel#dialogTitle { color: #17212b; font-size: 16px; font-weight: 700; }
-        QLabel#detailStatus { font-size: 14px; font-weight: 700; }
-        QLabel#detailSummary { color: #26333c; line-height: 1.35; }
-        QPushButton { background: #ffffff; border: 1px solid #b9c5ca; border-radius: 8px; color: #17212b; font-weight: 600; min-height: 30px; padding: 4px 11px; }
-        QPushButton:hover { background: #edf6f4; border-color: #0f766e; }
-        QPushButton:focus { border: 2px solid #0f766e; }
-        QPushButton:disabled { background: #e9edef; border-color: #d8e0e3; color: #7b878d; }
-        QPushButton[primary='true'] { background: #0f766e; border-color: #0f766e; color: #ffffff; }
-        QPushButton[primary='true']:hover { background: #0a5a54; border-color: #0a5a54; }
-        QTableWidget { background: #ffffff; border: 1px solid #dbe2e5; border-radius: 10px; gridline-color: #e7edef; selection-background-color: #dcefeb; selection-color: #17212b; }
-        QHeaderView::section { background: #edf1f2; border: none; border-bottom: 1px solid #dbe2e5; color: #41505a; font-size: 11px; font-weight: 700; padding: 8px; }
-        QPlainTextEdit { background: #f8fafb; border: 1px solid #dbe2e5; border-radius: 8px; color: #26333c; padding: 8px; }
-        QProgressBar { background: #e1e7e9; border: none; border-radius: 7px; min-height: 14px; text-align: center; color: #17212b; font-size: 11px; font-weight: 700; }
-        QProgressBar::chunk { background: #0f766e; border-radius: 7px; }
-    """)
 
 
 def launch() -> int:
