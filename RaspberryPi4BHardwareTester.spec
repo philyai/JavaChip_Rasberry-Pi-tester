@@ -5,7 +5,7 @@ a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('raspberry_pi_tester/assets/fonts', 'raspberry_pi_tester/assets/fonts')],
     # LD19 opens pyserial lazily so it must be collected for packaged builds.
     hiddenimports=['serial', 'serial.tools.list_ports'],
     hookspath=[],
